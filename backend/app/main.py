@@ -34,10 +34,14 @@ register_exception_handlers(app)
 cors_origins_raw = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
 cors_origins = [item.strip() for item in cors_origins_raw.split(",") if item.strip()]
 
+# Wildcard "*" requires allow_credentials=False (CORS spec / Starlette enforcement).
+# This is fine: auth uses JWT in Authorization header, not cookies.
+_allow_all = "*" in cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all else cors_origins,
+    allow_credentials=not _allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )
