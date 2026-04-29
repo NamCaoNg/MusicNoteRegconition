@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.db import Base, SessionLocal, engine
 from app.api.routes.auth_routes import router as auth_router
@@ -37,6 +40,39 @@ cors_origins = [item.strip() for item in cors_origins_raw.split(",") if item.str
 # Wildcard "*" requires allow_credentials=False (CORS spec / Starlette enforcement).
 # This is fine: auth uses JWT in Authorization header, not cookies.
 _allow_all = "*" in cors_origins
+
+
+class NgrokCorsPreflightMiddleware(BaseHTTPMiddleware):
+    """Handle CORS preflight (OPTIONS) before ngrok's interstitial page can interfere.
+
+    Ngrok free tier injects an HTML warning page on requests that lack the
+    ``ngrok-skip-browser-warning`` header.  Browsers never attach custom
+    headers to automatic preflight OPTIONS requests, so ngrok returns its
+    HTML page — which has **no** CORS headers — causing the browser to block
+    the subsequent real request.
+
+    This middleware short-circuits OPTIONS requests with the correct CORS
+    headers so the preflight always succeeds, regardless of ngrok.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            origin = request.headers.get("origin", "*")
+            resp_origin = "*" if _allow_all else origin
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": resp_origin,
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type, ngrok-skip-browser-warning",
+                    "Access-Control-Max-Age": "600",
+                },
+            )
+        return await call_next(request)
+
+
+# NgrokCorsPreflightMiddleware must be added first so it runs outermost.
+app.add_middleware(NgrokCorsPreflightMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
